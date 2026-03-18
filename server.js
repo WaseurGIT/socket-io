@@ -1,19 +1,41 @@
 // server.js
 // Main server file - Express + MongoDB (Socket.IO will be added in videos)
 
-import dotenv from 'dotenv';
-import express from 'express';
-import cors from 'cors';
-import { connectDB, getCollection, closeDB } from './config/database.js';
-
+import dotenv from "dotenv";
+import express from "express";
+import cors from "cors";
+import { connectDB, getCollection, closeDB } from "./config/database.js";
+import { Server } from "socket.io";
+import http from "http";
+import { orderHandler } from "./socket/orderHandler.js";
+import { generateOrderId } from "./utils/helper.js";
 // Load environment variables
 dotenv.config();
 
 // Create Express app
 const app = express();
 
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+});
+
+io.on("connection", (socket) => {
+  console.log("a user connected: " + socket.id);
+  socket.emit("connected", {
+    message: `User: ${socket.id} connected successfully!`,
+  });
+
+  // order it generator
+  console.log("Generated Order ID:", generateOrderId());
+
+  // for handling orders
+  orderHandler(io, socket)
+});
+
 // Middleware
-app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+app.use(cors({ origin: process.env.CLIENT_URL || "*", credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -22,69 +44,69 @@ app.use(express.urlencoded({ extended: true }));
 // ==========================================
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
   res.json({
-    status: 'ok',
-    message: 'Server is running',
-    timestamp: new Date().toISOString()
+    status: "ok",
+    message: "Server is running",
+    timestamp: new Date().toISOString(),
   });
 });
 
 // Get all orders
-app.get('/api/orders', async (req, res) => {
+app.get("/api/orders", async (req, res) => {
   try {
-    const ordersCollection = getCollection('orders');
+    const ordersCollection = getCollection("orders");
     const orders = await ordersCollection
       .find({})
       .sort({ createdAt: -1 })
       .limit(20)
       .toArray();
-    
-    res.json({ 
-      success: true, 
-      count: orders.length, 
-      orders 
+
+    res.json({
+      success: true,
+      count: orders.length,
+      orders,
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 });
 
 // Get single order by ID
-app.get('/api/orders/:orderId', async (req, res) => {
+app.get("/api/orders/:orderId", async (req, res) => {
   try {
-    const ordersCollection = getCollection('orders');
-    const order = await ordersCollection.findOne({ 
-      orderId: req.params.orderId 
+    const ordersCollection = getCollection("orders");
+    const order = await ordersCollection.findOne({
+      orderId: req.params.orderId,
     });
-    
+
     if (!order) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Order not found' 
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
       });
     }
-    
-    res.json({ 
-      success: true, 
-      order 
+
+    res.json({
+      success: true,
+      order,
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({ 
-    success: false, 
-    message: 'Route not found' 
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
   });
 });
 
@@ -92,25 +114,25 @@ app.use((req, res) => {
 // ERROR HANDLING
 // ==========================================
 
-process.on('uncaughtException', (error) => {
-  console.error('💥 Uncaught Exception:', error);
+process.on("uncaughtException", (error) => {
+  console.error("💥 Uncaught Exception:", error);
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
-  console.error('💥 Unhandled Rejection:', reason);
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 Unhandled Rejection:", reason);
   process.exit(1);
 });
 
 // Graceful shutdown
 const shutdown = async () => {
-  console.log('\n👋 Shutting down gracefully...');
+  console.log("\n👋 Shutting down gracefully...");
   await closeDB();
   process.exit(0);
 };
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 // ==========================================
 // START SERVER
@@ -118,9 +140,10 @@ process.on('SIGINT', shutdown);
 
 const PORT = process.env.PORT || 5000;
 
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`
+connectDB()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`
 ╔════════════════════════════════════════╗
 ║  🚀 Server Running                     ║
 ║  📡 Port: ${PORT}                         ║
@@ -128,13 +151,14 @@ connectDB().then(() => {
 ║  📊 MongoDB: Connected                 ║
 ╚════════════════════════════════════════╝
     `);
-    console.log('📝 API Endpoints:');
-    console.log(`   GET  /health`);
-    console.log(`   GET  /api/orders`);
-    console.log(`   GET  /api/orders/:orderId`);
-    console.log('\n✨ Ready! time to explore Socket.IO \n');
+      console.log("📝 API Endpoints:");
+      console.log(`   GET  /health`);
+      console.log(`   GET  /api/orders`);
+      console.log(`   GET  /api/orders/:orderId`);
+      console.log("\n✨ Ready! time to explore Socket.IO \n");
+    });
+  })
+  .catch((error) => {
+    console.error("❌ Failed to start server:", error);
+    process.exit(1);
   });
-}).catch(error => {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-});
